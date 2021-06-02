@@ -1,0 +1,379 @@
+SELECT (CASE
+                   WHEN 'SUMMARY' = 'DETAIL'
+                   THEN
+                      main.c_client_id
+                   WHEN 'SUMMARY' = 'SUMMARY' AND NULL IS NOT NULL
+                   THEN
+                      NULL
+                   WHEN ( 'SUMMARY' = 'SUMMARY'
+                     AND (1 >= (SELECT COUNT (*)
+                                  FROM mpstds.tds_ar_cust_header
+                                 WHERE customer_id IN (SELECT DISTINCT (customer_id)
+                                                         FROM mpstds.tds_ar_cust_site
+                                                        WHERE lawson_contract_code = c_client_id AND org_id = 81)
+                                   AND org_id = 81)))
+                   THEN
+                      (SELECT client_id
+                         FROM mpstds.tds_ar_cust_header
+                        WHERE customer_id IN (SELECT DISTINCT (customer_id)
+                                                FROM mpstds.tds_ar_cust_site
+                                               WHERE lawson_contract_code = c_client_id AND org_id = 81)
+                          AND org_id = 81)
+                   ELSE
+                      (SELECT DISTINCT b.description
+                         FROM apps.fnd_flex_value_sets a, apps.fnd_flex_values_vl b
+                        WHERE a.flex_value_set_id = b.flex_value_set_id
+                          AND a.flex_value_set_name = 'TDS_LAWSON_CODE'
+                          AND b.enabled_flag = 'Y'
+                          AND NVL (b.start_date_active, SYSDATE - 1) < TRUNC (SYSDATE)
+                          AND NVL (b.end_date_active, SYSDATE + 1) > TRUNC (SYSDATE)
+                          AND b.flex_value = main.c_client_id
+                          AND ROWNUM <= 1)
+                END)
+                  c_client_id,
+               (CASE
+                   WHEN 'SUMMARY' = 'DETAIL'
+                   THEN
+                      main.c_client_name
+                   WHEN 'SUMMARY' = 'SUMMARY' AND NULL IS NOT NULL
+                   THEN
+                      NULL
+                   WHEN ( 'SUMMARY' = 'SUMMARY'
+                     AND (1 >= (SELECT COUNT (*)
+                                  FROM mpstds.tds_ar_cust_header
+                                 WHERE customer_id IN (SELECT DISTINCT (customer_id)
+                                                         FROM mpstds.tds_ar_cust_site
+                                                        WHERE lawson_contract_code = c_client_name AND org_id = 81)
+                                   AND org_id = 81)))
+                   THEN
+                      (SELECT client_id
+                         FROM mpstds.tds_ar_cust_header
+                        WHERE customer_id IN (SELECT DISTINCT (customer_id)
+                                                FROM mpstds.tds_ar_cust_site
+                                               WHERE lawson_contract_code = c_client_name AND org_id = 81)
+                          AND org_id = 81)
+                   ELSE
+                      (SELECT DISTINCT b.description
+                         FROM apps.fnd_flex_value_sets a, apps.fnd_flex_values_vl b
+                        WHERE a.flex_value_set_id = b.flex_value_set_id
+                          AND a.flex_value_set_name = 'TDS_LAWSON_CODE'
+                          AND b.enabled_flag = 'Y'
+                          AND NVL (b.start_date_active, SYSDATE - 1) < TRUNC (SYSDATE)
+                          AND NVL (b.end_date_active, SYSDATE + 1) > TRUNC (SYSDATE)
+                          AND b.flex_value = main.c_client_name
+                          AND ROWNUM <= 1)
+                END)
+                  c_client_name,
+               c_paid_date,
+               c_claim_type,
+               g_paid_date,
+               c_seq,
+               c_claim_count,
+               c_ingrediant_cost,
+               c_dispensing_fee,
+               c_tax,
+               --c_other_fee, -- Added for Rev 5.0
+               c_copay,
+               (c_paid_amount - c_fin_transaction) c_paid_amount,                                                          --Rev 8.0 -- Updated for Rev 6.0
+               c_adj_amount,
+               c_partial_payment,                                                                                             -- Added for Rev 2.0
+               (c_fin_transaction * -1 ) c_fin_transaction,                                                                 --Rev 8.0    --Added for Rev 6.0
+               c_claim_paid_amount
+          FROM (SELECT (CASE WHEN 'SUMMARY' = 'DETAIL' THEN tab2.c_client_id WHEN 'SUMMARY' = 'SUMMARY' THEN tab2.lawson_contract_code END)
+                          c_client_id,
+                       (CASE WHEN 'SUMMARY' = 'DETAIL' THEN tab2.c_client_name WHEN 'SUMMARY' = 'SUMMARY' THEN tab2.lawson_contract_code END)
+                          c_client_name,
+                       tab2.c_paid_date,
+                       tab2.c_claim_type,
+                       tab2.c_paid_date g_paid_date,
+                       SUM (NVL (tab1.c_cnt, 0)) c_claim_count,
+                       SUM (NVL (tab1.c_ingrediant_cost, 0)) c_ingrediant_cost,
+                       SUM (NVL (tab1.c_dispensing_fee, 0)) c_dispensing_fee,
+                       SUM (NVL (tab1.c_tax, 0)) c_tax,                                         -- Need to change, once we have new column mapping
+                       --SUM(NVL (tab1.c_other_fee, 0)) c_other_fee, -- Added for Rev 5.0
+                       SUM (NVL (tab1.c_copay, 0)) c_copay,                                     -- Need to change, once we have new column mapping
+                       SUM (NVL (tab1.c_paid_amount, 0)) c_paid_amount,
+                       SUM (NVL (tab1.c_adj_amount, 0)) c_adj_amount,
+                       SUM (NVL (tab1.c_partial_payment, 0)) c_partial_payment,                                               -- Added for Rev 2.0
+                       SUM (NVL (tab3.c_fin_amount, 0) * -1) c_fin_transaction,                                               -- Added for Rev 6.0
+                       SUM (NVL (tab1.c_claim_paid_amount, 0)) c_claim_paid_amount,
+                       tab2.seq1 c_seq
+                  FROM (-- Commented for Rev 2.0
+                        /*SELECT aila.attribute6 c_client_id,
+                             TRUNC (aca.check_date) c_paid_date,
+                             (CASE
+                                 WHEN (aila.attribute5 = 'O' AND tab.mail_order_ind = 'Y')
+                                 THEN
+                                    'Mail Order'
+                                 WHEN (aila.attribute5 = 'O' AND tab.mail_order_ind = 'N')
+                                 THEN
+                                    'Retail'
+                                 WHEN aila.attribute5 = 'M'
+                                 THEN
+                                    'Member'
+                              END)
+                                c_claim_type,
+                             COUNT (1) c_cnt,
+                             SUM (NVL (aila.attribute1, 0)) c_ingrediant_cost,
+                             SUM (NVL (aila.attribute2, 0)) c_dispensing_fee,
+                             SUM (NVL (aila.attribute3, 0)) c_tax,
+                             SUM (NVL (aia.attribute10, 0)) c_copay,
+                             SUM (NVL (aipa.amount, 0)) c_paid_amount,
+                             SUM (NVL (tab2.amount, 0) + NVL (aila.attribute14, 0)) c_adj_amount,
+                             SUM (NVL (aia.global_attribute5, 0)) c_claim_paid_amount
+                        FROM ap.ap_checks_all aca,
+                             ap.ap_invoice_lines_all aila,
+                             ap.ap_invoice_payments_all aipa,
+                             mpstds.tds_ar_billing tab,
+                             ap.ap_invoices_all aia,       --left outer join
+                             (SELECT aipa1.check_id,
+                                     aia1.invoice_id,
+                                     aila1.attribute6,
+                                     aipa1.amount
+                                FROM ap.ap_invoices_all aia1,
+                                     ap.ap_invoice_payments_all aipa1,
+                                     ap.ap_invoice_lines_all aila1
+                               WHERE     aia1.invoice_id(+) = aipa1.invoice_id
+                                     AND aia1.invoice_id = aila1.invoice_id(+)
+                                     AND aia1.invoice_type_lookup_code(+) = 'MIXED') tab2 --on aia.attribute6 = tab2.attribute6 --and aipa.check_id = tab2.check_id
+                       WHERE     aia.invoice_id = aila.invoice_id
+                             AND aia.invoice_id = aipa.invoice_id
+                             AND aipa.check_id = aca.check_id
+                             AND aia.attribute6 = tab2.attribute6(+)
+                             AND NVL2 (tab2.check_id, aipa.check_id, -999999) =
+                                    NVL2 (tab2.check_id, tab2.check_id, -999999)
+                             AND tab.hs_id = aia.global_attribute2
+                             AND tab.hs_item_no = aia.global_attribute3
+                             AND aia.invoice_type_lookup_code <> 'MIXED'
+                             --AND aipa.reversal_flag IS NULL --anim
+                             AND TRUNC(aipa.creation_date) BETWEEN TRUNC (:p_date_from) AND TRUNC (:p_date_to) --anim
+                             AND TRUNC(aca.check_date) BETWEEN TRUNC (:p_date_from) AND TRUNC (:p_date_to)
+                             AND AIA.ORG_ID = 81
+                             AND AILA.ATTRIBUTE6 = NVL (NULL, AILA.ATTRIBUTE6)
+                    GROUP BY aila.attribute6,
+                             TRUNC (aca.check_date),
+                                      (CASE
+                                 WHEN (aila.attribute5 = 'O' AND tab.mail_order_ind = 'Y')
+                                 THEN
+                                    'Mail Order'
+                                 WHEN (aila.attribute5 = 'O' AND tab.mail_order_ind = 'N')
+                                 THEN
+                                    'Retail'
+                                 WHEN aila.attribute5 = 'M'
+                                 THEN
+                                    'Member'
+                              END)
+                    ORDER BY aila.attribute6, TRUNC (aca.check_date), c_claim_type*/
+                        -- Added for Rev 2.0
+                        SELECT c_client_id,
+                               c_check_date c_paid_date,
+                               c_claim_type,
+                               COUNT (*) c_cnt,
+                               SUM (c_ingrediant_cost) c_ingrediant_cost,
+                               SUM (c_dispensing_fee) c_dispensing_fee,
+                               SUM (c_tax) c_tax,
+                               --SUM (c_other_fee) c_other_fee, -- Added for Rev 5.0
+                               SUM (c_copay) c_copay,
+                               SUM (c_paid_amount) c_paid_amount,
+                               SUM (c_adj_amount) c_adj_amount,
+                               SUM (c_claim_paid_amount - c_paid_amount - c_adj_amount) c_partial_payment,
+                               SUM (c_claim_paid_amount) c_claim_paid_amount
+                          FROM (SELECT TRUNC (aca.check_date) c_check_date, SUM (NVL (aip.amount, 0)) c_paid_amount, tabs.*
+                                  FROM (SELECT aila.attribute6 c_client_id,
+                                               aia.invoice_id,
+                                               (CASE
+                                                   WHEN (aila.attribute5 = 'O' AND tab.mail_order_ind = 'Y') THEN 'Mail Order'
+                                                   WHEN (aila.attribute5 = 'O' AND tab.mail_order_ind = 'N') THEN 'Retail'
+                                                   WHEN aila.attribute5 = 'M' THEN 'Member'
+                                                END)
+                                                  c_claim_type,
+                                               (NVL (aila.attribute1, 0)) c_ingrediant_cost,
+                                               (NVL (aila.attribute2, 0)) c_dispensing_fee,
+                                               (NVL (aila.attribute3, 0)) c_tax,
+                                               --(NVL (aila.global_attribute1, 0) + NVL (aila.global_attribute2, 0)) c_other_fee, -- Added for Rev 5.0
+                                               (NVL (aia.attribute10, 0)) c_copay,
+                                               --NVL (tab2.amount, 0) + NVL (aila.attribute14, 0)) c_adj_amount, --Commented for v5.0
+                                               (NVL (aila.attribute14, 0)) c_adj_amount,                                          --Added for v5.0
+                                               (NVL (aia.global_attribute5, 0)) c_claim_paid_amount
+                                          FROM ap.ap_invoice_lines_all aila,
+                                               mpstds.tds_ar_billing tab,
+                                               ap.ap_invoices_all aia,
+                                               /*(SELECT aipa1.check_id,
+                                                       aia1.invoice_id,
+                                                       aila1.attribute6,
+                                                       aipa1.amount
+                                                  FROM ap.ap_invoices_all aia1,
+                                                       ap.ap_invoice_payments_all aipa1,
+                                                       ap.ap_invoice_lines_all aila1
+                                                 WHERE     aia1.invoice_id(+) = aipa1.invoice_id
+                                                       AND aia1.invoice_id = aila1.invoice_id(+)
+                                                       --AND aipa1.reversal_flag IS NULL -- Commented for Rev 3.0
+                                                       AND aia1.invoice_type_lookup_code(+) = 'MIXED') tab2,*/
+                                               --Commented for v5.0
+                                               apps.tds_client_lawson_v cust_lawson                                               -- Added for 4.0
+                                         WHERE aia.invoice_id = aila.invoice_id
+                                           --AND aia.attribute6 = tab2.attribute6(+) --Commented for v5.0
+                                           AND tab.hs_id = aia.global_attribute2
+                                           AND tab.hs_item_no = aia.global_attribute3
+                                           --AND aia.invoice_type_lookup_code <> 'MIXED' --Commented for v5.0
+                                           AND aia.org_id = 81
+                                           AND aila.attribute6 = cust_lawson.client_id                                            -- Added for 4.0
+                                           AND cust_lawson.org_id = 81                                                     -- Added for 4.0
+                                           AND cust_lawson.lawson_contract_code =
+                                                  DECODE ( 'ALL', 'ALL', cust_lawson.lawson_contract_code, 'ALL')         -- Added for 4.0
+                                           AND aia.global_attribute13 = NVL ( NULL, aia.global_attribute13)                  --Added for v5.0
+										   AND tab.source_data = aia.global_attribute13                                           -- Added for Rev 7.0
+                                           AND aila.attribute6 = NVL ( NULL, aila.attribute6)) tabs,
+                                       ap.ap_invoice_payments_all aip,
+                                       ap.ap_checks_all aca
+                                 WHERE tabs.invoice_id = aip.invoice_id
+                                   AND aip.check_id = aca.check_id
+                                   AND aip.reversal_inv_pmt_id IS NULL                                                        -- Added for Rev 3.0
+                                   --AND aip.reversal_flag IS NULL -- Commented for Rev 3.0
+                                   AND TRUNC (aip.creation_date) BETWEEN '15-FEB-2021' AND '15-FEB-2021'
+                                   AND TRUNC (aca.check_date) BETWEEN '15-FEB-2021' AND '15-FEB-2021'
+                                GROUP BY TRUNC (aca.check_date),
+                                         aca.check_id,                                                                        -- Added for Rev 3.0
+                                         c_client_id,
+                                         tabs.invoice_id,
+                                         c_claim_type,
+                                         c_ingrediant_cost,
+                                         c_dispensing_fee,
+                                         c_tax,
+                                         --c_other_fee, -- Added for 5.0
+                                         c_copay,
+                                         c_adj_amount,
+                                         c_claim_paid_amount)
+                        GROUP BY c_client_id, c_check_date, c_claim_type
+                        ORDER BY c_client_id, c_check_date, c_claim_type-- End of addition for Rev 2.0
+                       ) tab1
+                       RIGHT OUTER JOIN                                                                                       -- Added for Rev 6.0
+                       (SELECT tab.client_id c_client_id,
+                               tab.client_id c_client_name,
+                               cust_lawson.lawson_contract_code,                                                                  -- Added for 4.0
+                               flv.meaning c_claim_type,
+                               TRUNC (aca.check_date) c_paid_date,
+                               flv.seq seq1
+                          FROM ap.ap_checks_all aca,
+                               ap.ap_invoice_lines_all aila,
+                               ap.ap_invoice_payments_all aipa,
+                               mpstds.tds_ar_billing tab,
+                               ap.ap_invoices_all aia,                                                                           --left outer join
+                               (SELECT flv.meaning, flv.lookup_code seq
+                                  FROM apps.fnd_lookup_values flv
+                                 WHERE lookup_type = 'MPS_CLAIM_TYPE') flv,
+                               --Commented below for v5.0
+                               /*(SELECT aipa1.check_id,
+                                       aia1.invoice_id,
+                                       aila1.attribute6,
+                                       aipa1.amount
+                                  FROM ap.ap_invoices_all aia1,
+                                       ap.ap_invoice_payments_all aipa1,
+                                       ap.ap_invoice_lines_all aila1
+                                 WHERE     aia1.invoice_id(+) = aipa1.invoice_id
+                                       AND aia1.invoice_id = aila1.invoice_id(+)
+                                       --AND aipa1.reversal_flag IS NULL -- Added for Rev 2.0 -- Commented for Rev 3.0
+                                       AND aia1.invoice_type_lookup_code(+) = 'MIXED') tab2,*/
+                               --on aia.attribute6 = tab2.attribute6 --and aipa.check_id = tab2.check_id
+                               apps.tds_client_lawson_v cust_lawson                                                                    -- Added for 4.0
+                         WHERE aia.invoice_id = aila.invoice_id
+                           AND aia.invoice_id = aipa.invoice_id
+                           AND aipa.check_id = aca.check_id
+                           --AND aia.attribute6 = tab2.attribute6(+) --Commented for v5.0
+                           /*AND NVL2 (tab2.check_id, aipa.check_id, -999999) =
+                                  NVL2 (tab2.check_id, tab2.check_id, -999999)*/
+                           --Commented for v5.0
+                           AND tab.hs_id = aia.global_attribute2
+                           AND tab.hs_item_no = aia.global_attribute3
+                           --AND aia.invoice_type_lookup_code <> 'MIXED' --Commented for v5.0
+                           --AND aipa.reversal_flag IS NULL --anim -- Uncommented for Rev 2.0 -- Commented for Rev 3.0
+                           AND TRUNC (aipa.creation_date) BETWEEN '15-FEB-2021' AND '15-FEB-2021'                            --anim
+                           AND NVL2 (tab.if_claim_type_code, -999999, -999999) = NVL2 (flv.seq, -999999, -999999)
+                           AND TRUNC (aca.check_date) BETWEEN '15-FEB-2021' AND '15-FEB-2021'
+                           AND aia.org_id = 81
+                           AND aila.attribute6 = NVL ( NULL, aila.attribute6)
+                           AND aila.attribute6 = cust_lawson.client_id                                                            -- Added for 4.0
+                           AND cust_lawson.org_id = 81                                                                     -- Added for 4.0
+                           AND cust_lawson.lawson_contract_code = DECODE ( 'ALL', 'ALL', cust_lawson.lawson_contract_code, 'ALL') -- Added for 4.0
+                           AND aia.global_attribute13 = NVL ( NULL, aia.global_attribute13)                                  --Added for v5.0
+						   AND tab.source_data = aia.global_attribute13                                                        -- Added for Rev 7.0
+                        GROUP BY tab.client_id,
+                                 tab.client_id,
+                                 cust_lawson.lawson_contract_code,                                                                -- Added for 4.0
+                                 flv.meaning,
+                                 flv.seq,
+                                 TRUNC (aca.check_date)
+					        -- Addes for rev 10.0
+                     union
+                         SELECT aila.attribute6 C_CLIENT_ID,
+                                aila.attribute6 c_client_name,
+                                cust_lawson.lawson_contract_code,  
+                               'Retail' C_CLAIM_TYPE,
+                                TRUNC (aca.check_date) C_PAID_DATE,
+                               '10' seq1
+                          FROM ap.ap_checks_all aca,
+                               ap.ap_invoice_lines_all aila,
+                               ap.ap_invoice_payments_all aipa,
+                               ap.ap_invoices_all aia,
+                               apps.tds_client_lawson_v cust_lawson
+                         WHERE aia.global_attribute2 = 'FIN_TRANSACTION'
+                           --AND aia.invoice_type_lookup_code = 'MIXED'  rev 10.1 V11.0
+                           AND aia.global_attribute13 = NVL ( NULL, aia.global_attribute13)
+                           AND aia.org_id = 81
+                           AND aila.attribute6 = NVL ( NULL, aila.attribute6)
+                           AND aila.attribute6 = cust_lawson.client_id
+                           AND cust_lawson.org_id = 81
+                           AND cust_lawson.lawson_contract_code = DECODE ( 'ALL', 'ALL', cust_lawson.lawson_contract_code, 'ALL')
+                           AND aia.invoice_id = aila.invoice_id
+                           AND aipa.reversal_inv_pmt_id IS NULL   --- Rev 9.0
+                           AND aia.invoice_id = aipa.invoice_id
+                           AND aipa.check_id = aca.check_id
+                           AND TRUNC (aipa.creation_date) BETWEEN '15-FEB-2021' AND '15-FEB-2021'
+                           AND TRUNC (aca.check_date) BETWEEN '15-FEB-2021' AND '15-FEB-2021'
+                          GROUP BY   aila.attribute6,cust_lawson.lawson_contract_code,TRUNC (aca.check_date) ) tab2 ---- end for Rev 10.0
+								 
+                          -- Added for Rev 6.0
+                          ON tab1.C_CLIENT_ID = tab2.C_CLIENT_ID
+                         AND tab1.C_CLAIM_TYPE = tab2.C_CLAIM_TYPE
+                         AND tab1.C_PAID_DATE = tab2.C_PAID_DATE
+                       LEFT OUTER JOIN     --- Rev 9.0
+                       (SELECT aila.attribute6 C_CLIENT_ID,
+                               'Retail' C_CLAIM_TYPE,
+                               TRUNC (aca.check_date) C_PAID_DATE,
+                               SUM (NVL (aipa.amount, 0)) C_FIN_AMOUNT
+                          FROM ap.ap_checks_all aca,
+                               ap.ap_invoice_lines_all aila,
+                               ap.ap_invoice_payments_all aipa,
+                               ap.ap_invoices_all aia,
+                               apps.tds_client_lawson_v cust_lawson
+                         WHERE aia.global_attribute2 = 'FIN_TRANSACTION'
+                           --AND aia.invoice_type_lookup_code = 'MIXED'  rev 10.1 
+                           AND aia.global_attribute13 = NVL ( NULL, aia.global_attribute13)
+                           AND aia.org_id = 81
+                           AND aila.attribute6 = NVL ( NULL, aila.attribute6)
+                           AND aila.attribute6 = cust_lawson.client_id
+                           AND cust_lawson.org_id = 81
+                           AND cust_lawson.lawson_contract_code = DECODE ( 'ALL', 'ALL', cust_lawson.lawson_contract_code, 'ALL')
+                           AND aia.invoice_id = aila.invoice_id
+						   AND aipa.reversal_inv_pmt_id IS NULL   --- Rev 9.0
+                           AND aia.invoice_id = aipa.invoice_id
+                           AND aipa.check_id = aca.check_id
+                           AND TRUNC (aipa.creation_date) BETWEEN '15-FEB-2021' AND '15-FEB-2021'
+                           AND TRUNC (aca.check_date) BETWEEN '15-FEB-2021' AND '15-FEB-2021'
+                        GROUP BY TRUNC (aca.check_date), aila.attribute6) tab3
+                          ON tab2.C_CLIENT_ID = tab3.C_CLIENT_ID
+                         AND tab2.C_CLAIM_TYPE = tab3.C_CLAIM_TYPE
+                         AND tab2.C_PAID_DATE = tab3.C_PAID_DATE
+                         
+                         
+                         
+                         
+                         
+                -- End of addition for Rev 6.0
+                GROUP BY (CASE WHEN 'SUMMARY' = 'DETAIL' THEN tab2.c_client_id WHEN 'SUMMARY' = 'SUMMARY' THEN tab2.lawson_contract_code END),
+                         (CASE WHEN 'SUMMARY' = 'DETAIL' THEN tab2.c_client_name WHEN 'SUMMARY' = 'SUMMARY' THEN tab2.lawson_contract_code END),
+                         tab2.c_paid_date,
+                         tab2.c_claim_type,
+                         tab2.c_paid_date,
+                         tab2.seq1) main                                                                                          -- Added for 4.0
+        ORDER BY c_client_id, c_paid_date, c_seq
